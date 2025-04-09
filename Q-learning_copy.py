@@ -14,7 +14,7 @@ class VANETEnv(gym.Env):
 
         # Action & Observation spaces
         self.action_space = spaces.Discrete(4)  # 0: inc beacon, 1: dec beacon, 2: inc power, 3: dec power
-        self.observation_space = spaces.Tuple((
+        self.observation_space = spaces.Tuple(( 
             spaces.Discrete(20),  # beacon rate
             spaces.Discrete(30),  # power
             spaces.Discrete(100)  # density
@@ -140,8 +140,10 @@ class VANETEnv(gym.Env):
 
     def plot_reward(self):
         """
-        Opsional, panggil ini misal setelah beberapa request atau command khusus
+        Plot reward vs timestep setiap setelah sejumlah langkah
+        Menggunakan mode interaktif agar tidak menghentikan alur server
         """
+        plt.ion()  # Turn on interactive mode
         plt.figure(figsize=(10, 6))
         plt.plot(self.timestamps, self.rewards, label="Reward")
         plt.xlabel("Global Step")
@@ -150,9 +152,12 @@ class VANETEnv(gym.Env):
         plt.grid(True)
         plt.legend()
         plt.show()
+        plt.pause(0.1)  # Allow the plot to update
+        plt.ioff()  # Turn off interactive mode after plotting
 
 
-# ============ Server Class ============
+
+# ============ Server Class ============ 
 class Server:
     def __init__(self, host='localhost', port=5000,
                  alpha=0.1, gamma=0.9, epsilon=0.1,
@@ -162,6 +167,8 @@ class Server:
 
         # Buat environment persisten
         self.env = VANETEnv(alpha, gamma, epsilon, pi_b, pi_p_prime, pi_p2, kb)
+        self.request_count = 0  # Track jumlah request yang diterima
+        self.plot_frequency = 100  # Setiap 100 request baru plot
 
     def start_server(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -181,22 +188,26 @@ class Server:
                 break
             decoded_data = json.loads(data.decode('utf-8'))
 
-            # if user sends e.g. {"plot": true}, we can show the plot
-            if 'plot' in decoded_data:
-                self.env.plot_reward()
-                continue
+            # Menambahkan output untuk melihat jumlah request yang diterima
+            self.request_count += 1
+            print(f"Request Count: {self.request_count}")  # Menampilkan jumlah request
 
             beacon_rate = decoded_data['beaconRate']
             power_transmission = decoded_data['transmissionPower']
             cbr_value = decoded_data.get('CBR', 0.5)  # default 0.5
-            cbr_density = cbr_value * 100            # 0..1 -> 0..100
+            cbr_density = cbr_value * 100  # 0..1 -> 0..100
 
-            # Jalankan training (atau "step" ringkas) pada environment persisten
+            # Train once and get updated beacon and power
             new_beacon_rate, new_power_transmission = self.env.train_once(
                 beacon_rate, power_transmission, cbr_density
             )
 
-            # Buat respon
+            # Track request count for plotting purpose
+            if self.request_count % self.plot_frequency == 0:
+                print("[INFO] Plotting Reward after 100 requests...")  # Debug output
+                self.env.plot_reward()  # Plot after every 100 requests
+
+            # Send back the updated values
             response = {
                 "transmissionPower": new_power_transmission,
                 "beaconRate": new_beacon_rate,
